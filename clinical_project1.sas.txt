@@ -1,0 +1,132 @@
+/* Clinical SAS Mini Project: SDTM + ADaM */
+
+data demo_raw;
+input subjid sex $ age trt $ trtsdt :date9.;
+format trtsdt date9.;
+datalines;
+101 M 25 A 01JAN2023
+102 F 30 B 05JAN2023
+103 M 17 A 03JAN2023
+;
+run;
+
+data ae_raw;
+input subjid aedecod $ aeser $ aesev $ aestdt :date9.;
+format aestdt date9.;
+datalines;
+101 Headache Y Mild 02JAN2023
+102 Fever N Moderate 01JAN2023
+103 Nausea Y Severe 10JAN2023
+;
+run;
+
+data lab_raw;
+input subjid lbtest $ lbvalue visit $;
+datalines;
+101 Hb 13.5 BASELINE
+101 Hb 15.0 WEEK1
+102 Hb 12.0 BASELINE
+102 Hb 11.5 WEEK1
+103 Hb 14.2 BASELINE
+103 Hb 13.8 WEEK1
+;
+run;
+
+/* SDTM datasets */
+
+data dm;
+set demo_raw;
+studyid = "XYZ123";
+domain = "DM";
+usubjid = cats(studyid, "-", subjid);
+run;
+
+data ae;
+set ae_raw;
+studyid = "XYZ123";
+domain = "AE";
+usubjid = cats(studyid, "-", subjid);
+run;
+
+data lb;
+set lab_raw;
+studyid = "XYZ123";
+domain = "LB";
+usubjid = cats(studyid, "-", subjid);
+run;
+
+/* ADSL */
+
+proc sort data=dm; by subjid; run;
+proc sort data=ae; by subjid; run;
+
+data ae_first;
+set ae;
+by subjid;
+if first.subjid;
+run;
+
+data adsl;
+merge dm(in=a) ae_first(in=b);
+by subjid;
+if a;
+
+if age < 18 then agegrp = "CHILD";
+else if age < 65 then agegrp = "ADULT";
+else agegrp = "OLD";
+
+if trt ne "" then saffl = "Y";
+
+if aestdt >= trtsdt then teae = "Y";
+else teae = "N";
+
+run;
+
+/* Lab shift */
+
+proc sort data=lb; by subjid visit; run;
+
+data lab_shift;
+set lb;
+by subjid;
+
+retain base;
+
+if visit = "BASELINE" then base = lbvalue;
+
+if visit = "WEEK1" then do;
+    if lbvalue > base then shift = "INCREASE";
+    else if lbvalue < base then shift = "DECREASE";
+    else shift = "NO CHANGE";
+    output;
+end;
+
+run;
+
+/* QC */
+
+proc means data=adsl n nmiss;
+run;
+
+proc sort data=adsl nodupkey;
+by usubjid;
+run;
+
+proc freq data=adsl;
+tables teae*aeser;
+run;
+
+/* Output */
+
+proc freq data=adsl;
+tables trt*teae;
+run;
+
+proc means data=adsl;
+class trt;
+var age;
+run;
+
+proc freq data=lab_shift;
+tables shift;
+run;
